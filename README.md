@@ -7,63 +7,6 @@
 Поиск кратчайшего пути по заданным условиям на основе построенной карты маршрутов.\
 Сериализация и десериализация транспортного каталока с использованием Google Protobuf.
 
-## Работа с транспортным каталогом
-Класс **TransportCatalogue** поддерживает следующие основные методы:
-```c++
- // добавляет остановку в каталог
-void AddStop(const std::string &stop_name, geo::Coordinates coordinate);
-// формирует маршрут из списка остановок и добавляет его в каталог.
-// все остановки по маршруту должны быть предварительно добавлены методом AddStop
-// если какой-то остановки из списка нет в каталоге - выбрасывает исключение
-void AddRoute(const std::string &route_name, domain::RouteType route_type, const std::vector<std::string> &stops);
-// добавляет в каталог информацию о расстоянии между двумя остановками
-// если какой-то из остановок нет в каталоге - выбрасывает исключение
-void SetDistance(const std::string &stop_from, const std::string &stop_to, int distance);
-
-// возвращает информацию о маршруе по его имени
-// если маршрута нет в каталоге - выбрасывает исключение std::out_of_range
-domain::RouteInfo GetRouteInfo(const std::string &route_name) const;
-
-// возвращает список автобусов, проходящих через остановку
-// если остановки нет в каталоге - выбрасывает исключение std::out_of_range
-std::optional<std::reference_wrapper<const std::set<std::string_view>>>
-GetBusesOnStop(const std::string &stop_name) const;
-// возвращает расстояние между остановками 1 и 2 - в прямом, либо если нет - в обратном направлении
-// если информации о расстоянии нет в каталоге - выбрасывает исключение
-int GetDistance(const std::string &stop_from, const std::string &stop_to) const;
-```
-Для реализации основных возможностей каталога реализован "фасад" **TransportCatalogueHandler**. Основные методы фасада:
-```c++
-// конструктор, принимает транспортный каталог по ссылке
-explicit TransportCatalogueHandler(TransportCatalogue &catalogue);
-
-// возвращает информацию о маршруе по его имени
-// если маршрута нет в каталоге - выбрасывает исключение std::out_of_range
-domain::RouteInfo GetRouteInfo(const std::string &route_name) const;
-
-// возвращает список автобусов, проходящих через остановку
-// если остановки нет в каталоге - выбрасывает исключение std::out_of_range
-std::optional<std::reference_wrapper<const std::set<std::string_view>>>
-GetBusesOnStop(const std::string &stop_name) const;
-
-// возвращает сформированную "карту" маршрутов в формате svg-документа
-svg::Document RenderMap() const;
-
-// возвращает маршрут между двумя остановками
-std::optional<Route> BuildRoute(const std::string &from, const std::string &to);
-
-// загружает все доступные данные из JSON
-void LoadDataFromJson(const json_reader::JsonIO &json);
-
-// загружает запросы из Json и выводит ответы в поток out
-void LoadRequestsAndAnswer(const json_reader::JsonIO &json, std::ostream &out);
-
-// Сериализует доступные данные
-bool SerializeData();
-// Десериализует доступные данные
-bool DeserializeData();
-```
-
 ## Сборка с помощью CMake
 > 0. Скачайте и соберите Google Protobuf под вашу версию компилятора
 > 1. Создайте папку для сборки программы
