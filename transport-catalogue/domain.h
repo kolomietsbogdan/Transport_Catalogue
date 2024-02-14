@@ -1,22 +1,25 @@
-#pragma once
+#pragma once  
+  
+#include "geo.h" 
+#include "graph.h" 
 
-#include <set>
-#include <string>
-#include <vector>
+namespace domain {
 
-#include "geo.h"
+    struct Stop {
+        Stop(const std::string& name, const geo::Coordinates& coordinates);
+        
+        int GetDistance(Stop* to);
+        std::string name;
+        geo::Coordinates coordinates;
+        std::unordered_map<std::string_view, int> stop_distances;
+    };
 
-namespace transport_catalogue {
-    namespace domain {
-			struct Stop {
-				std::string stop_name_ = {};
-				geo::Coordinates coordinates_ = {};
-				std::set<std::string_view> buses = {};
-			};
-			struct Bus {
-				std::string bus_name_ = {};
-				std::vector<Stop*> stops_ = {};
-				bool is_roundtrip_ = false;
-			};
-    }
+    struct Bus {
+        Bus(const std::string& name, std::vector<Stop*> stops, bool is_roundtrip);
+
+        std::string name;
+        std::vector<Stop*> stops;
+        bool is_roundtrip;
+        Stop* final_stop = nullptr;
+    };
 }

@@ -1,52 +1,129 @@
 #include "request_handler.h"
 
-void RequestHandler::Handle(transport_catalogue::catalogue::TransportCatalogue& catalogue, const std::vector<StatRequest>& requests, const std::string& map_to_string) {
-	json::Builder builder;
-	builder.StartArray();
+using namespace std;
+using namespace domain;
+using namespace transport_catalogue;
 
-	for (const auto& request : requests) {
-		if (request.GetType() == "Bus") {
-			if (catalogue.FindBus(request.GetName()) == nullptr) {
-				builder.StartDict()
-					.Key("request_id").Value(request.id)
-					.Key("error_message").Value("not found")
-					.EndDict();
-			}
-			else {
-				transport_catalogue::catalogue::TransportCatalogue::BusInfo bus_info = catalogue.GetBusInfo(request.GetName());
+RequestHandler::RequestHandler(const transport_catalogue::TransportCatalogue& TransportCatalogue,
+    const transport_catalogue::TransportRouter& router, const renderer::MapRenderer& renderer)
+    : db_(TransportCatalogue)
+    , router_(router)
+    , renderer_(renderer) {}
 
-				builder.StartDict()
-					.Key("curvature").Value(bus_info.curvature)
-					.Key("request_id").Value(request.id)
-					.Key("route_length").Value(bus_info.route_length)
-					.Key("stop_count").Value(bus_info.stops_amount)
-					.Key("unique_stop_count").Value(bus_info.unique_stops)
-					.EndDict();
-			}
-		} else if (request.GetType() == "Stop") {
-			if (catalogue.FindStop(request.GetName()) == nullptr) {
-				builder.StartDict()
-					.Key("request_id").Value(request.id)
-					.Key("error_message").Value("not found")
-					.EndDict();
-			} else {
-				std::set<std::string_view> stop_info = catalogue.GetStopInfo(request.GetName());
+void RequestHandler::Handle(const json::Node& json_input, std::ostream& output) {
+    const json::Array& arr = json_input.AsArray();
+    json::Array output_array;
+    output_array.reserve(arr.size());
+    for (auto& request_node : arr) {
+        const json::Dict& request_map = request_node.AsDict();
+        const string& type = request_map.at("type"s).AsString();
+        if (type == "Stop"s) {
+            output_array.push_back(FindStopRequestProcessing(request_map));
+            continue;
+        }
+        if (type == "Bus"s) {
+            output_array.push_back(FindBusRequestProcessing(request_map));
+            continue;
+        }
+        if (type == "Map"s) {
+            output_array.push_back(BuildMapRequestProcessing(request_map));
+            continue;
+        }
+        if (type == "Route"s) {
+            output_array.push_back(BuildRouteRequestProcessing(request_map));
+            continue;
+        }
+    }
+    json::Print(json::Document(json::Node(move(output_array))), output);
+}
 
-				builder.StartDict().Key("buses").StartArray();
+svg::Document RequestHandler::RenderMap() const {
+    return renderer_.GetSvgDocument(db_.GetSortedAllBuses());
+}
 
-				for (const auto& bus : stop_info) {
-					builder.Value(static_cast<std::string>(bus));
-				}
-				builder.EndArray().Key("request_id").Value(request.id).EndDict();
-			}
-		} else if (request.GetType() == "Map") {
-			builder.StartDict().Key("map").Value(map_to_string).Key("request_id").Value(request.id).EndDict();
-		} else {
-			throw std::logic_error("request type not found");
-		}
-	}
-	builder.EndArray();
+json::Node RequestHandler::FindStopRequestProcessing(const json::Dict& request_map) {
+    int id = request_map.at("id"s).AsInt();
+    const string& name = request_map.at("name"s).AsString();
+    if (const Stop* stop = db_.FindStop(name)) {
+        json::Array buses_array;
+        const auto& buses_on_stop = db_.GetBusesOnStop(stop->name);
+        buses_array.reserve(buses_on_stop.size());
+        for (auto& [bus_name, bus] : buses_on_stop) {
+            buses_array.push_back(bus->name);
+        }
+        return json::Node(json::Dict{
+                {{"buses"s},{move(buses_array)}},
+                {{"request_id"s},{id}}
+            });
+    } else {
+        return json::Builder{}.StartDict()
+            .Key("error_message"s).Value("not found"s)
+            .Key("request_id"s).Value(id)
+            .EndDict().Build();
+    }
+}
 
-	json::Print(json::Document{ builder.Build() }, std::cout);
-	std::cout << std::endl;
+json::Node RequestHandler::FindBusRequestProcessing(const json::Dict& request_map) {
+    int id = request_map.at("id"s).AsInt();
+    const string& name = request_map.at("name"s).AsString();
+    if (const Bus* bus = db_.FindBus(name)) {
+        int stops_count = bus->stops.size();
+        int distance = 0;
+        double straight_distance = 0.0;
+        for (int i = 1; i < stops_count; ++i) {
+            distance += bus->stops[i - 1]->GetDistance(bus->stops[i]);
+            straight_distance += geo::ComputeDistance(bus->stops[i - 1]->coordinates, bus->stops[i]->coordinates);
+        }
+        double curvature = distance / straight_distance;
+        unordered_set<string> unique_stops_set;
+        for (transport_catalogue::Stop* s : bus->stops) {
+            unique_stops_set.emplace(s->name);
+        }
+        int unique_stops = unique_stops_set.size();
+        return json::Node(json::Dict{
+                {{"route_length"s},{distance}},
+                {{"unique_stop_count"s},{unique_stops}},
+                {{"stop_count"s},{stops_count}},
+                {{"curvature"s},{curvature}},
+                {{"request_id"s},{id}}
+            });
+    } else {
+        return json::Builder{}.StartDict()
+            .Key("error_message"s).Value("not found"s)
+            .Key("request_id"s).Value(id)
+            .EndDict().Build();
+    }
+}
+
+json::Node RequestHandler::BuildMapRequestProcessing(const json::Dict& request_map) {
+    int id = request_map.at("id"s).AsInt();
+    svg::Document map = RenderMap();
+    ostringstream strm;
+    map.Render(strm);
+    return json::Node(json::Dict{
+                {{"map"s},{strm.str()}},
+                {{"request_id"s},{id}}
+        });
+}
+
+json::Node RequestHandler::BuildRouteRequestProcessing(const json::Dict& request_map) {
+    int id = request_map.at("id"s).AsInt();
+    const string& name_from = request_map.at("from"s).AsString();
+    const string& name_to = request_map.at("to"s).AsString();
+    if (const Stop* stop_from = db_.FindStop(name_from)) {
+        if (const Stop* stop_to = db_.FindStop(name_to)) {
+            if (auto ri = router_.GetRouteInfo(stop_from, stop_to)) {
+                auto [wieght, edges] = ri.value();
+                return json::Node(json::Dict{
+                    {{"items"s},{router_.GetEdgesItems(edges)}},
+                    {{"total_time"s},{wieght}},
+                    {{"request_id"s},{id}}
+                    });
+            }
+        }
+    }
+    return json::Builder{}.StartDict()
+        .Key("error_message"s).Value("not found"s)
+        .Key("request_id"s).Value(id)
+        .EndDict().Build();
 }

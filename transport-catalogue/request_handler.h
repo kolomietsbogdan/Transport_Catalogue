@@ -1,9 +1,23 @@
 #pragma once
 
-#include "json_reader.h"
-#include "json_builder.h"
+#include "map_renderer.h"
+#include "transport_router.h"
 
-class RequestHandler { 
+class RequestHandler {
 public:
-    void Handle(transport_catalogue::catalogue::TransportCatalogue& catalogue, const std::vector<StatRequest>& requests, const std::string& map_to_string); 
-}; 
+    RequestHandler(const transport_catalogue::TransportCatalogue& TransportCatalogue, const transport_catalogue::TransportRouter& router, const renderer::MapRenderer& renderer);
+
+    void Handle(const json::Node& json_doc, std::ostream& output);
+
+    svg::Document RenderMap() const;
+
+private:
+    const transport_catalogue::TransportCatalogue& db_;
+    const transport_catalogue::TransportRouter& router_;
+    const renderer::MapRenderer& renderer_;
+
+    json::Node FindStopRequestProcessing(const json::Dict& request_map);
+    json::Node FindBusRequestProcessing(const json::Dict& request_map);
+    json::Node BuildMapRequestProcessing(const json::Dict& request_map);
+    json::Node BuildRouteRequestProcessing(const json::Dict& request_map);
+};
